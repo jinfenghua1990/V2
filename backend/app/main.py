@@ -1,19 +1,29 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import models  # noqa: F401
 from .db import Base, SessionLocal, engine, get_db
-from .master_data import resolve_party, resolve_product, resolve_source_record
+from .master_data import (
+    get_party,
+    get_product,
+    list_review_source_records,
+    resolve_party,
+    resolve_product,
+    resolve_source_record,
+)
 from .schemas import (
     PartyResolveRequest,
+    PartyResponse,
     ProductResolveRequest,
+    ProductResponse,
     ResolveResponse,
     SourceRecordResolveRequest,
+    SourceRecordReviewResponse,
 )
 
 
@@ -42,6 +52,30 @@ def create_app(
     @app.get("/healthz")
     def healthz():
         return {"ok": True, "service": "v2", "dataModel": "canonical-master-v1"}
+
+    @app.get("/api/v1/parties/{party_id}", response_model=PartyResponse)
+    def get_party_endpoint(party_id: str, db: Session = Depends(get_db)):
+        try:
+            return get_party(db, party_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/v1/products/{product_id}", response_model=ProductResponse)
+    def get_product_endpoint(product_id: str, db: Session = Depends(get_db)):
+        try:
+            return get_product(db, product_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get(
+        "/api/v1/source-records/review",
+        response_model=List[SourceRecordReviewResponse],
+    )
+    def list_review_source_records_endpoint(
+        limit: int = Query(default=100, ge=1, le=200),
+        db: Session = Depends(get_db),
+    ):
+        return list_review_source_records(db, limit=limit)
 
     @app.post("/api/v1/parties/resolve", response_model=ResolveResponse)
     def resolve_party_endpoint(

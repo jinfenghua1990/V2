@@ -350,6 +350,78 @@ def resolve_source_record(
     return _result("matched", entity_type, entity_id, source.id, [], "已人工确认并绑定到规范实体")
 
 
+def get_party(db: Session, party_id: str) -> Dict[str, Any]:
+    party = db.get(Party, party_id)
+    if party is None:
+        raise LookupError("规范主体不存在")
+    roles = [
+        row[0]
+        for row in db.query(PartyRole.role)
+        .filter(PartyRole.party_id == party.id)
+        .order_by(PartyRole.role)
+        .all()
+    ]
+    identifiers = [
+        {"kind": row.kind, "value": row.value}
+        for row in db.query(PartyIdentifier)
+        .filter(PartyIdentifier.party_id == party.id)
+        .order_by(PartyIdentifier.kind, PartyIdentifier.value)
+        .all()
+    ]
+    return {
+        "id": party.id,
+        "kind": party.kind,
+        "canonical_name": party.canonical_name,
+        "status": party.status,
+        "merged_into_id": party.merged_into_id,
+        "roles": roles,
+        "identifiers": identifiers,
+    }
+
+
+def get_product(db: Session, product_id: str) -> Dict[str, Any]:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise LookupError("规范产品不存在")
+    identifiers = [
+        {"kind": row.kind, "value": row.value}
+        for row in db.query(ProductIdentifier)
+        .filter(ProductIdentifier.product_id == product.id)
+        .order_by(ProductIdentifier.kind, ProductIdentifier.value)
+        .all()
+    ]
+    return {
+        "id": product.id,
+        "product_code": product.product_code,
+        "canonical_name": product.canonical_name,
+        "status": product.status,
+        "identifiers": identifiers,
+    }
+
+
+def list_review_source_records(db: Session, *, limit: int = 100) -> List[Dict[str, Any]]:
+    records = (
+        db.query(SourceRecord)
+        .filter(SourceRecord.resolution_status == "needs_review")
+        .order_by(SourceRecord.received_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": record.id,
+            "source_system": record.source_system,
+            "source_object_type": record.source_object_type,
+            "source_external_id": record.source_external_id,
+            "resolution_status": record.resolution_status,
+            "candidate_ids": record.candidate_entity_ids or [],
+            "payload": record.payload,
+            "received_at": record.received_at,
+        }
+        for record in records
+    ]
+
+
 def _result(
     status: str,
     entity_type: str,
