@@ -38,6 +38,7 @@ PYTHONPATH=backend .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --po
 - `GET /healthz`：服务和数据模型健康检查。
 - `POST /api/v1/parties/resolve`：将客户、供应商、公司等主体解析到同一个规范主体主档。
 - `POST /api/v1/products/resolve`：将外部产品来源解析到唯一规范产品主档。
+- `POST /api/v1/source-records/{source_record_id}/resolve`：人工确认待审核来源记录的规范归属。
 
 ## 当前边界
 

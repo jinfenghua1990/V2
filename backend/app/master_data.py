@@ -296,6 +296,60 @@ def resolve_product(
     return _result("created", "product", product.id, source.id, [], "已创建唯一规范产品")
 
 
+def resolve_source_record(
+    db: Session,
+    *,
+    source_record_id: str,
+    entity_type: str,
+    entity_id: str,
+    party_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    source = db.get(SourceRecord, source_record_id)
+    if source is None:
+        raise LookupError("来源记录不存在")
+    if source.resolution_status not in {"unresolved", "needs_review"}:
+        raise ValueError("来源记录已经处理，不能重复确认")
+    if entity_type == "party":
+        entity = db.get(Party, entity_id)
+    elif entity_type == "product":
+        entity = db.get(Product, entity_id)
+    else:
+        raise ValueError("不支持的规范实体类型")
+    if entity is None:
+        raise LookupError("规范实体不存在")
+    if entity_type != "party" and party_role:
+        raise ValueError("只有主体来源记录可以追加主体角色")
+
+    binding = (
+        db.query(ExternalBinding)
+        .filter(
+            ExternalBinding.source_system == source.source_system,
+            ExternalBinding.source_object_type == source.source_object_type,
+            ExternalBinding.source_external_id == source.source_external_id,
+        )
+        .one_or_none()
+    )
+    if binding is not None:
+        if binding.entity_type != entity_type or binding.entity_id != entity_id:
+            raise ValueError("外部来源已经绑定到其他规范实体")
+    else:
+        db.add(
+            ExternalBinding(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                source_system=source.source_system,
+                source_object_type=source.source_object_type,
+                source_external_id=source.source_external_id,
+                source_record_id=source.id,
+            )
+        )
+    if entity_type == "party":
+        _ensure_party_role(db, entity_id, party_role)
+    _mark_source(source, entity_type=entity_type, entity_id=entity_id, status="matched")
+    db.commit()
+    return _result("matched", entity_type, entity_id, source.id, [], "已人工确认并绑定到规范实体")
+
+
 def _result(
     status: str,
     entity_type: str,

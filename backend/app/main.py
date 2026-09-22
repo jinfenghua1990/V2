@@ -8,8 +8,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from . import models  # noqa: F401
 from .db import Base, SessionLocal, engine, get_db
-from .master_data import resolve_party, resolve_product
-from .schemas import PartyResolveRequest, ProductResolveRequest, ResolveResponse
+from .master_data import resolve_party, resolve_product, resolve_source_record
+from .schemas import (
+    PartyResolveRequest,
+    ProductResolveRequest,
+    ResolveResponse,
+    SourceRecordResolveRequest,
+)
 
 
 def create_app(
@@ -55,6 +60,26 @@ def create_app(
     ):
         try:
             return resolve_product(db, **body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/v1/source-records/{source_record_id}/resolve",
+        response_model=ResolveResponse,
+    )
+    def resolve_source_record_endpoint(
+        source_record_id: str,
+        body: SourceRecordResolveRequest,
+        db: Session = Depends(get_db),
+    ):
+        try:
+            return resolve_source_record(
+                db,
+                source_record_id=source_record_id,
+                **body.model_dump(),
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 

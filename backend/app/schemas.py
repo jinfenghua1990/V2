@@ -26,6 +26,12 @@ class ProductResolveRequest(BaseModel):
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceRecordResolveRequest(BaseModel):
+    entity_type: Literal["party", "product"]
+    entity_id: str = Field(min_length=1, max_length=36)
+    party_role: Optional[str] = Field(default=None, min_length=1, max_length=32)
+
+
 class ResolveResponse(BaseModel):
     status: Literal["created", "matched", "needs_review"]
     entity_type: Literal["party", "product"]
