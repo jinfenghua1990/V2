@@ -1,5 +1,5 @@
-from app.master_data import resolve_party, resolve_product
-from app.models import ExternalBinding, Party, PartyRole, Product, SourceRecord
+from app.master_data import resolve_party, resolve_product, resolve_source_record
+from app.models import AuditEvent, ExternalBinding, Party, PartyRole, Product, SourceRecord
 
 
 def party_input(**overrides):
@@ -128,3 +128,38 @@ def test_duplicate_source_import_keeps_both_source_records(db_session):
     assert db_session.query(Party).count() == 1
     assert db_session.query(SourceRecord).count() == 2
     assert db_session.query(ExternalBinding).count() == 1
+
+
+def test_audit_events_preserve_resolution_history(db_session):
+    first = resolve_party(db_session, **party_input())
+    review = resolve_party(
+        db_session,
+        **party_input(
+            tax_identifier="",
+            source_system="1688",
+            source_object_type="seller",
+            source_external_id="audit-review-1",
+        ),
+    )
+    resolve_source_record(
+        db_session,
+        source_record_id=review["source_record_id"],
+        entity_type="party",
+        entity_id=first["entity_id"],
+        party_role="supplier",
+    )
+    resolve_product(db_session, **product_input())
+
+    events = db_session.query(AuditEvent).all()
+    event_types = {event.event_type for event in events}
+    review_event_types = {
+        event.event_type
+        for event in events
+        if event.source_record_id == review["source_record_id"]
+    }
+
+    assert {"party.created", "product.created", "source_record.received"}.issubset(event_types)
+    assert {"source_record.needs_review", "source_record.matched", "source_record.manually_resolved"}.issubset(
+        review_event_types
+    )
+    assert all(event.actor_type == "system" for event in events)

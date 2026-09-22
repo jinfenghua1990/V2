@@ -42,13 +42,15 @@ PYTHONPATH=backend .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --po
 - `GET /api/v1/parties/{party_id}`：读取统一主体主档及角色、强标识。
 - `GET /api/v1/products/{product_id}`：读取统一产品主档及强标识。
 - `GET /api/v1/source-records/review`：读取待人工确认的来源记录。
+- `GET /api/v1/audit-events`：按规范实体或来源记录读取处理审计事件。
 - `POST /api/v1/parties/resolve`：将客户、供应商、公司等主体解析到同一个规范主体主档。
 - `POST /api/v1/products/resolve`：将外部产品来源解析到唯一规范产品主档。
 - `POST /api/v1/source-records/{source_record_id}/resolve`：人工确认待审核来源记录的规范归属。
 
 ## 当前边界
 
-- 本地默认使用 SQLite；第一版 Alembic 迁移已加入，正式环境接入前还需要权限、审计和备份流程。
+- 本地默认使用 SQLite；第一版 Alembic 迁移已加入，正式环境接入前还需要认证、权限和备份流程。
+- 主数据审计事件已加入；当前 `actor_type=system`，认证和权限尚未实现，不能把接口当作生产安全边界。
 - 外部平台连接器、采购/销售/库存业务模块尚未接入。
 - 解析无法确认时只产生待审核来源记录，不会按名称自动创建第二个主体或产品。
 - 本轮没有修改旧系统，也没有占用或替换 8000 端口。

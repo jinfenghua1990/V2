@@ -67,6 +67,18 @@ class SourceRecordReviewResponse(BaseModel):
     received_at: datetime
 
 
+class AuditEventResponse(BaseModel):
+    id: str
+    event_type: str
+    entity_type: str
+    entity_id: Optional[str]
+    source_record_id: Optional[str]
+    actor_type: str
+    actor_id: Optional[str]
+    details: Dict[str, Any]
+    created_at: datetime
+
+
 class ResolveResponse(BaseModel):
     status: Literal["created", "matched", "needs_review"]
     entity_type: Literal["party", "product"]

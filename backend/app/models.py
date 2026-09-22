@@ -157,3 +157,26 @@ class ExternalBinding(Base):
         ForeignKey("source_records.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
+
+
+class AuditEvent(Base):
+    """不可覆盖的主数据处理事件；身份认证接入前先保留系统处理轨迹。"""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_entity", "entity_type", "entity_id"),
+        Index("ix_audit_events_source_record", "source_record_id"),
+        Index("ix_audit_events_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    entity_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    source_record_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("source_records.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_type: Mapped[str] = mapped_column(String(24), nullable=False, default="system")
+    actor_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    details: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)

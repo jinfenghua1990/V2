@@ -11,6 +11,7 @@ from .db import Base, SessionLocal, engine, get_db
 from .master_data import (
     get_party,
     get_product,
+    list_audit_events,
     list_review_source_records,
     resolve_party,
     resolve_product,
@@ -21,6 +22,7 @@ from .schemas import (
     PartyResponse,
     ProductResolveRequest,
     ProductResponse,
+    AuditEventResponse,
     ResolveResponse,
     SourceRecordResolveRequest,
     SourceRecordReviewResponse,
@@ -76,6 +78,22 @@ def create_app(
         db: Session = Depends(get_db),
     ):
         return list_review_source_records(db, limit=limit)
+
+    @app.get("/api/v1/audit-events", response_model=List[AuditEventResponse])
+    def list_audit_events_endpoint(
+        entity_type: Optional[str] = Query(default=None, min_length=1, max_length=24),
+        entity_id: Optional[str] = Query(default=None, min_length=1, max_length=36),
+        source_record_id: Optional[str] = Query(default=None, min_length=1, max_length=36),
+        limit: int = Query(default=100, ge=1, le=200),
+        db: Session = Depends(get_db),
+    ):
+        return list_audit_events(
+            db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            source_record_id=source_record_id,
+            limit=limit,
+        )
 
     @app.post("/api/v1/parties/resolve", response_model=ResolveResponse)
     def resolve_party_endpoint(

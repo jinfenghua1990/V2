@@ -156,3 +156,12 @@ def test_api_reads_canonical_records_and_review_queue(client):
     assert review_queue.status_code == 200
     assert review_queue.json()[0]["id"] == review.json()["source_record_id"]
     assert review_queue.json()[0]["payload"] == {"raw_name": "查询主体"}
+
+    audit = client.get(
+        f"/api/v1/audit-events?entity_type=party&entity_id={party.json()['entity_id']}"
+    )
+    assert audit.status_code == 200
+    assert {item["event_type"] for item in audit.json()} >= {
+        "party.created",
+        "source_record.matched",
+    }

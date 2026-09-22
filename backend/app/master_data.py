@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     ExternalBinding,
+    AuditEvent,
     Party,
     PartyIdentifier,
     PartyRole,
@@ -69,7 +70,64 @@ def _new_source_record(
     )
     db.add(record)
     db.flush()
+    _audit_event(
+        db,
+        event_type="source_record.received",
+        entity_type="source_record",
+        entity_id=record.id,
+        source_record_id=record.id,
+        details={"content_hash": record.content_hash},
+    )
     return record
+
+
+def _audit_event(
+    db: Session,
+    *,
+    event_type: str,
+    entity_type: str,
+    entity_id: Optional[str],
+    source_record_id: Optional[str],
+    details: Dict[str, Any],
+) -> None:
+    db.add(
+        AuditEvent(
+            event_type=event_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            source_record_id=source_record_id,
+            actor_type="system",
+            details=details,
+        )
+    )
+
+
+def _record_resolution(
+    db: Session,
+    source: SourceRecord,
+    *,
+    entity_type: str,
+    entity_id: Optional[str],
+    status: str,
+    reason: str,
+    candidates: Optional[List[str]] = None,
+) -> None:
+    candidate_ids = candidates or []
+    _mark_source(
+        source,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        status=status,
+        candidates=candidate_ids,
+    )
+    _audit_event(
+        db,
+        event_type=f"source_record.{status}",
+        entity_type=entity_type,
+        entity_id=entity_id,
+        source_record_id=source.id,
+        details={"reason": reason, "candidate_ids": candidate_ids},
+    )
 
 
 def _mark_source(
@@ -152,7 +210,14 @@ def resolve_party(
         if party is None:
             raise ValueError("外部映射指向不存在的主体")
         _ensure_party_role(db, party.id, role)
-        _mark_source(source, entity_type="party", entity_id=party.id, status="matched")
+        _record_resolution(
+            db,
+            source,
+            entity_type="party",
+            entity_id=party.id,
+            status="matched",
+            reason="external_binding",
+        )
         db.commit()
         return _result("matched", "party", party.id, source.id, [], "已按外部来源映射到同一主体")
 
@@ -169,7 +234,14 @@ def resolve_party(
         if identifier is not None:
             _ensure_party_role(db, identifier.party_id, role)
             _bind(db, entity_type="party", entity_id=identifier.party_id, source=source)
-            _mark_source(source, entity_type="party", entity_id=identifier.party_id, status="matched")
+            _record_resolution(
+                db,
+                source,
+                entity_type="party",
+                entity_id=identifier.party_id,
+                status="matched",
+                reason="strong_identifier",
+            )
             db.commit()
             return _result("matched", "party", identifier.party_id, source.id, [], "已按强身份标识映射到同一主体")
 
@@ -181,13 +253,29 @@ def resolve_party(
         .all()
     ]
     if candidates:
-        _mark_source(source, entity_type="party", entity_id=None, status="needs_review", candidates=candidates)
+        _record_resolution(
+            db,
+            source,
+            entity_type="party",
+            entity_id=None,
+            status="needs_review",
+            reason="name_only",
+            candidates=candidates,
+        )
         db.commit()
         return _result("needs_review", "party", None, source.id, candidates, "名称相同但缺少足够身份依据，等待人工确认")
 
     party = Party(kind=kind, canonical_name=name.strip(), normalized_name=normalized_name)
     db.add(party)
     db.flush()
+    _audit_event(
+        db,
+        event_type="party.created",
+        entity_type="party",
+        entity_id=party.id,
+        source_record_id=source.id,
+        details={"kind": party.kind, "canonical_name": party.canonical_name},
+    )
     if normalized_identifier:
         db.add(
             PartyIdentifier(
@@ -200,7 +288,14 @@ def resolve_party(
         )
     _ensure_party_role(db, party.id, role)
     _bind(db, entity_type="party", entity_id=party.id, source=source)
-    _mark_source(source, entity_type="party", entity_id=party.id, status="matched")
+    _record_resolution(
+        db,
+        source,
+        entity_type="party",
+        entity_id=party.id,
+        status="matched",
+        reason="created",
+    )
     db.commit()
     return _result("created", "party", party.id, source.id, [], "已创建唯一规范主体")
 
@@ -237,7 +332,14 @@ def resolve_product(
         product = db.get(Product, binding.entity_id)
         if product is None:
             raise ValueError("外部映射指向不存在的产品")
-        _mark_source(source, entity_type="product", entity_id=product.id, status="matched")
+        _record_resolution(
+            db,
+            source,
+            entity_type="product",
+            entity_id=product.id,
+            status="matched",
+            reason="external_binding",
+        )
         db.commit()
         return _result("matched", "product", product.id, source.id, [], "已按外部来源映射到同一产品")
 
@@ -254,7 +356,14 @@ def resolve_product(
         )
         if candidate is not None:
             _bind(db, entity_type="product", entity_id=candidate.product_id, source=source)
-            _mark_source(source, entity_type="product", entity_id=candidate.product_id, status="matched")
+            _record_resolution(
+                db,
+                source,
+                entity_type="product",
+                entity_id=candidate.product_id,
+                status="matched",
+                reason="strong_identifier",
+            )
             db.commit()
             return _result("matched", "product", candidate.product_id, source.id, [], "已按产品强标识映射到同一产品")
 
@@ -266,7 +375,15 @@ def resolve_product(
         .all()
     ]
     if candidates:
-        _mark_source(source, entity_type="product", entity_id=None, status="needs_review", candidates=candidates)
+        _record_resolution(
+            db,
+            source,
+            entity_type="product",
+            entity_id=None,
+            status="needs_review",
+            reason="name_only",
+            candidates=candidates,
+        )
         db.commit()
         return _result("needs_review", "product", None, source.id, candidates, "产品名称相同但缺少强标识，等待人工确认")
 
@@ -278,6 +395,14 @@ def resolve_product(
     )
     db.add(product)
     db.flush()
+    _audit_event(
+        db,
+        event_type="product.created",
+        entity_type="product",
+        entity_id=product.id,
+        source_record_id=source.id,
+        details={"product_code": product.product_code, "canonical_name": product.canonical_name},
+    )
     if not any(kind == "product_code" for kind, _value, _normalized in identifiers):
         identifiers.append(("product_code", code, normalize_identifier(code)))
     for kind, value, normalized in identifiers:
@@ -291,7 +416,14 @@ def resolve_product(
             )
         )
     _bind(db, entity_type="product", entity_id=product.id, source=source)
-    _mark_source(source, entity_type="product", entity_id=product.id, status="matched")
+    _record_resolution(
+        db,
+        source,
+        entity_type="product",
+        entity_id=product.id,
+        status="matched",
+        reason="created",
+    )
     db.commit()
     return _result("created", "product", product.id, source.id, [], "已创建唯一规范产品")
 
@@ -345,7 +477,22 @@ def resolve_source_record(
         )
     if entity_type == "party":
         _ensure_party_role(db, entity_id, party_role)
-    _mark_source(source, entity_type=entity_type, entity_id=entity_id, status="matched")
+    _record_resolution(
+        db,
+        source,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        status="matched",
+        reason="manual_review",
+    )
+    _audit_event(
+        db,
+        event_type="source_record.manually_resolved",
+        entity_type=entity_type,
+        entity_id=entity_id,
+        source_record_id=source.id,
+        details={"party_role": party_role},
+    )
     db.commit()
     return _result("matched", entity_type, entity_id, source.id, [], "已人工确认并绑定到规范实体")
 
@@ -419,6 +566,38 @@ def list_review_source_records(db: Session, *, limit: int = 100) -> List[Dict[st
             "received_at": record.received_at,
         }
         for record in records
+    ]
+
+
+def list_audit_events(
+    db: Session,
+    *,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    source_record_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    query = db.query(AuditEvent)
+    if entity_type:
+        query = query.filter(AuditEvent.entity_type == entity_type)
+    if entity_id:
+        query = query.filter(AuditEvent.entity_id == entity_id)
+    if source_record_id:
+        query = query.filter(AuditEvent.source_record_id == source_record_id)
+    events = query.order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc()).limit(limit).all()
+    return [
+        {
+            "id": event.id,
+            "event_type": event.event_type,
+            "entity_type": event.entity_type,
+            "entity_id": event.entity_id,
+            "source_record_id": event.source_record_id,
+            "actor_type": event.actor_type,
+            "actor_id": event.actor_id,
+            "details": event.details,
+            "created_at": event.created_at,
+        }
+        for event in events
     ]
 
 
