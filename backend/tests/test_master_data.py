@@ -119,6 +119,109 @@ def test_same_product_name_without_strong_identifier_waits_for_review(db_session
     assert db_session.query(ExternalBinding).count() == 1
 
 
+def test_conflicting_product_identifiers_wait_for_review(db_session):
+    first = resolve_product(
+        db_session,
+        **product_input(
+            name="商品 A",
+            product_code="CODE-A",
+            barcode="BAR-A",
+            source_external_id="code-a",
+        ),
+    )
+    second = resolve_product(
+        db_session,
+        **product_input(
+            name="商品 B",
+            product_code="CODE-B",
+            barcode="BAR-B",
+            source_external_id="code-b",
+        ),
+    )
+
+    conflict = resolve_product(
+        db_session,
+        **product_input(
+            name="冲突产品",
+            product_code="CODE-A",
+            barcode="BAR-B",
+            source_external_id="identifier-conflict",
+        ),
+    )
+    source = db_session.query(SourceRecord).filter_by(
+        source_external_id="identifier-conflict"
+    ).one()
+
+    assert conflict["status"] == "needs_review"
+    assert conflict["entity_id"] is None
+    assert set(conflict["candidate_ids"]) == {first["entity_id"], second["entity_id"]}
+    assert source.resolution_status == "needs_review"
+    assert set(source.candidate_entity_ids) == {first["entity_id"], second["entity_id"]}
+    assert db_session.query(Product).count() == 2
+    assert db_session.query(ExternalBinding).count() == 2
+
+
+def test_party_kind_conflicts_wait_for_review(db_session):
+    first = resolve_party(
+        db_session,
+        **party_input(source_external_id="kind-conflict-source"),
+    )
+    same_source = resolve_party(
+        db_session,
+        **party_input(
+            kind="person",
+            source_external_id="kind-conflict-source",
+        ),
+    )
+    same_tax_identifier = resolve_party(
+        db_session,
+        **party_input(
+            kind="person",
+            source_external_id="kind-conflict-tax",
+        ),
+    )
+
+    assert same_source["status"] == "needs_review"
+    assert same_source["candidate_ids"] == [first["entity_id"]]
+    assert same_tax_identifier["status"] == "needs_review"
+    assert same_tax_identifier["candidate_ids"] == [first["entity_id"]]
+    assert db_session.query(Party).count() == 1
+    assert db_session.query(ExternalBinding).count() == 1
+
+
+def test_inactive_same_name_records_wait_for_review(db_session):
+    party = resolve_party(
+        db_session,
+        **party_input(tax_identifier="", source_external_id="inactive-party-old"),
+    )
+    db_session.get(Party, party["entity_id"]).status = "inactive"
+    db_session.commit()
+
+    party_again = resolve_party(
+        db_session,
+        **party_input(tax_identifier="", source_external_id="inactive-party-new"),
+    )
+
+    product = resolve_product(
+        db_session,
+        **product_input(product_code="", barcode="", source_external_id="inactive-product-old"),
+    )
+    db_session.get(Product, product["entity_id"]).status = "inactive"
+    db_session.commit()
+
+    product_again = resolve_product(
+        db_session,
+        **product_input(product_code="", barcode="", source_external_id="inactive-product-new"),
+    )
+
+    assert party_again["status"] == "needs_review"
+    assert party_again["candidate_ids"] == [party["entity_id"]]
+    assert db_session.query(Party).count() == 1
+    assert product_again["status"] == "needs_review"
+    assert product_again["candidate_ids"] == [product["entity_id"]]
+    assert db_session.query(Product).count() == 1
+
+
 def test_duplicate_source_import_keeps_both_source_records(db_session):
     first = resolve_party(db_session, **party_input())
     second = resolve_party(db_session, **party_input())

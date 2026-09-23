@@ -1,3 +1,4 @@
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
@@ -12,7 +13,23 @@ def test_healthz(client):
         "ok": True,
         "service": "v2",
         "dataModel": "canonical-master-v1",
+        "database": "ok",
     }
+
+
+def test_healthz_reports_missing_schema():
+    engine = create_engine("sqlite://")
+    client = TestClient(
+        create_app(
+            session_factory=sessionmaker(bind=engine),
+            enforce_auth=False,
+        )
+    )
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "数据库或主数据结构不可用"
 
 
 def test_app_factory_does_not_create_database_schema():

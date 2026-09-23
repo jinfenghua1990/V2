@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .db import SessionLocal, get_db
+from .db import Base, SessionLocal, get_db
 from .master_data import (
     get_party,
     get_product,
@@ -53,8 +55,22 @@ def create_app(
     app.dependency_overrides[get_db] = override_get_db
 
     @app.get("/healthz")
-    def healthz():
-        return {"ok": True, "service": "v2", "dataModel": "canonical-master-v1"}
+    def healthz(db: Session = Depends(get_db)):
+        try:
+            existing_tables = set(inspect(db.get_bind()).get_table_names())
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="数据库或主数据结构不可用",
+            ) from exc
+        if not Base.metadata.tables.keys() <= existing_tables:
+            raise HTTPException(status_code=503, detail="数据库或主数据结构不可用")
+        return {
+            "ok": True,
+            "service": "v2",
+            "dataModel": "canonical-master-v1",
+            "database": "ok",
+        }
 
     @app.get("/api/v1/parties/{party_id}", response_model=PartyResponse)
     def get_party_endpoint(

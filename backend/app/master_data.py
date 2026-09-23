@@ -186,6 +186,48 @@ def _bind(
     )
 
 
+def _review_party_kind_conflict(
+    db: Session,
+    source: SourceRecord,
+    *,
+    party: Party,
+    requested_kind: str,
+    actor_type: str,
+    actor_id: Optional[str],
+) -> Dict[str, Any]:
+    candidates = [party.id]
+    _record_resolution(
+        db,
+        source,
+        entity_type="party",
+        entity_id=None,
+        status="needs_review",
+        reason="kind_conflict",
+        candidates=candidates,
+        actor_type=actor_type,
+        actor_id=actor_id,
+    )
+    _audit_event(
+        db,
+        event_type="party.kind_conflict",
+        entity_type="party",
+        entity_id=party.id,
+        source_record_id=source.id,
+        details={"requested_kind": requested_kind, "existing_kind": party.kind},
+        actor_type=actor_type,
+        actor_id=actor_id,
+    )
+    db.commit()
+    return _result(
+        "needs_review",
+        "party",
+        None,
+        source.id,
+        candidates,
+        "来源主体类型与已有主体不一致，已加入待审核队列",
+    )
+
+
 def resolve_party(
     db: Session,
     *,
@@ -274,6 +316,15 @@ def resolve_party(
         party = db.get(Party, binding.entity_id)
         if party is None:
             raise ValueError("外部映射指向不存在的主体")
+        if party.kind != kind:
+            return _review_party_kind_conflict(
+                db,
+                source,
+                party=party,
+                requested_kind=kind,
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
         _ensure_party_role(db, party.id, role)
         _record_resolution(
             db,
@@ -299,6 +350,18 @@ def resolve_party(
             .one_or_none()
         )
         if identifier is not None:
+            party = db.get(Party, identifier.party_id)
+            if party is None:
+                raise ValueError("强身份标识指向不存在的主体")
+            if party.kind != kind:
+                return _review_party_kind_conflict(
+                    db,
+                    source,
+                    party=party,
+                    requested_kind=kind,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
             _ensure_party_role(db, identifier.party_id, role)
             _bind(db, entity_type="party", entity_id=identifier.party_id, source=source)
             _record_resolution(
@@ -318,7 +381,7 @@ def resolve_party(
     candidates = [
         row[0]
         for row in db.query(Party.id)
-        .filter(Party.normalized_name == normalized_name, Party.status == "active")
+        .filter(Party.normalized_name == normalized_name)
         .all()
     ]
     if candidates:
@@ -475,6 +538,7 @@ def resolve_product(
         normalized = normalize_identifier(value)
         if normalized:
             identifiers.append((kind, value.strip(), normalized))
+    matched_product_ids = set()
     for kind, _value, normalized in identifiers:
         candidate = (
             db.query(ProductIdentifier)
@@ -482,25 +546,52 @@ def resolve_product(
             .one_or_none()
         )
         if candidate is not None:
-            _bind(db, entity_type="product", entity_id=candidate.product_id, source=source)
-            _record_resolution(
-                db,
-                source,
-                entity_type="product",
-                entity_id=candidate.product_id,
-                status="matched",
-                reason="strong_identifier",
-                actor_type=actor_type,
-                actor_id=actor_id,
-            )
-            db.commit()
-            return _result("matched", "product", candidate.product_id, source.id, [], "已按产品强标识映射到同一产品")
+            matched_product_ids.add(candidate.product_id)
+
+    if len(matched_product_ids) > 1:
+        candidates = sorted(matched_product_ids)
+        _record_resolution(
+            db,
+            source,
+            entity_type="product",
+            entity_id=None,
+            status="needs_review",
+            reason="conflicting_identifiers",
+            candidates=candidates,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+        db.commit()
+        return _result(
+            "needs_review",
+            "product",
+            None,
+            source.id,
+            candidates,
+            "产品编码与条码分别指向不同产品，已加入待审核队列",
+        )
+
+    if matched_product_ids:
+        product_id = next(iter(matched_product_ids))
+        _bind(db, entity_type="product", entity_id=product_id, source=source)
+        _record_resolution(
+            db,
+            source,
+            entity_type="product",
+            entity_id=product_id,
+            status="matched",
+            reason="strong_identifier",
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+        db.commit()
+        return _result("matched", "product", product_id, source.id, [], "已按产品强标识映射到同一产品")
 
     normalized_name = normalize_text(name)
     candidates = [
         row[0]
         for row in db.query(Product.id)
-        .filter(Product.normalized_name == normalized_name, Product.status == "active")
+        .filter(Product.normalized_name == normalized_name)
         .all()
     ]
     if candidates:
