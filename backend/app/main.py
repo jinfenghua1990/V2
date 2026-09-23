@@ -27,6 +27,12 @@ from .schemas import (
     SourceRecordResolveRequest,
     SourceRecordReviewResponse,
 )
+from .security import (
+    Principal,
+    allow_local_access,
+    require_api_access,
+    require_write_access,
+)
 
 
 def create_app(
@@ -34,10 +40,13 @@ def create_app(
     db_engine: Optional[Engine] = None,
     session_factory: Optional[sessionmaker] = None,
     initialize: bool = True,
+    enforce_auth: bool = True,
 ) -> FastAPI:
     app = FastAPI(title="V2", version="0.1.0")
     actual_engine = db_engine or engine
     actual_factory = session_factory or SessionLocal
+    read_dependency = require_api_access if enforce_auth else allow_local_access
+    write_dependency = require_write_access if enforce_auth else allow_local_access
 
     if initialize:
         Base.metadata.create_all(bind=actual_engine)
@@ -56,14 +65,22 @@ def create_app(
         return {"ok": True, "service": "v2", "dataModel": "canonical-master-v1"}
 
     @app.get("/api/v1/parties/{party_id}", response_model=PartyResponse)
-    def get_party_endpoint(party_id: str, db: Session = Depends(get_db)):
+    def get_party_endpoint(
+        party_id: str,
+        db: Session = Depends(get_db),
+        _principal: Principal = Depends(read_dependency),
+    ):
         try:
             return get_party(db, party_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/v1/products/{product_id}", response_model=ProductResponse)
-    def get_product_endpoint(product_id: str, db: Session = Depends(get_db)):
+    def get_product_endpoint(
+        product_id: str,
+        db: Session = Depends(get_db),
+        _principal: Principal = Depends(read_dependency),
+    ):
         try:
             return get_product(db, product_id)
         except LookupError as exc:
@@ -76,6 +93,7 @@ def create_app(
     def list_review_source_records_endpoint(
         limit: int = Query(default=100, ge=1, le=200),
         db: Session = Depends(get_db),
+        _principal: Principal = Depends(read_dependency),
     ):
         return list_review_source_records(db, limit=limit)
 
@@ -86,6 +104,7 @@ def create_app(
         source_record_id: Optional[str] = Query(default=None, min_length=1, max_length=36),
         limit: int = Query(default=100, ge=1, le=200),
         db: Session = Depends(get_db),
+        _principal: Principal = Depends(read_dependency),
     ):
         return list_audit_events(
             db,
@@ -99,9 +118,15 @@ def create_app(
     def resolve_party_endpoint(
         body: PartyResolveRequest,
         db: Session = Depends(get_db),
+        principal: Principal = Depends(write_dependency),
     ):
         try:
-            return resolve_party(db, **body.model_dump())
+            return resolve_party(
+                db,
+                **body.model_dump(),
+                actor_type=principal.actor_type,
+                actor_id=principal.actor_id,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -109,9 +134,15 @@ def create_app(
     def resolve_product_endpoint(
         body: ProductResolveRequest,
         db: Session = Depends(get_db),
+        principal: Principal = Depends(write_dependency),
     ):
         try:
-            return resolve_product(db, **body.model_dump())
+            return resolve_product(
+                db,
+                **body.model_dump(),
+                actor_type=principal.actor_type,
+                actor_id=principal.actor_id,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -123,12 +154,15 @@ def create_app(
         source_record_id: str,
         body: SourceRecordResolveRequest,
         db: Session = Depends(get_db),
+        principal: Principal = Depends(write_dependency),
     ):
         try:
             return resolve_source_record(
                 db,
                 source_record_id=source_record_id,
                 **body.model_dump(),
+                actor_type=principal.actor_type,
+                actor_id=principal.actor_id,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

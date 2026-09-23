@@ -31,6 +31,9 @@ python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 V2_DATABASE_URL=sqlite:///./data/v2.db .venv/bin/alembic -c backend/alembic.ini upgrade head
 PYTHONPATH=backend .venv/bin/python -m pytest -q backend/tests
+export V2_API_KEY='请在本地环境保存随机长密钥'
+export V2_API_ACTOR_ID=local-admin
+export V2_API_ROLE=admin
 PYTHONPATH=backend .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
@@ -47,10 +50,13 @@ PYTHONPATH=backend .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --po
 - `POST /api/v1/products/resolve`：将外部产品来源解析到唯一规范产品主档。
 - `POST /api/v1/source-records/{source_record_id}/resolve`：人工确认待审核来源记录的规范归属。
 
+除 `/healthz` 外，接口需要 `Authorization: Bearer $V2_API_KEY`。默认 `admin` 和 `operator` 可以写入，`viewer` 只能读取；可通过 `V2_API_READ_ROLES` 和 `V2_API_WRITE_ROLES` 调整角色集合。
+
 ## 当前边界
 
-- 本地默认使用 SQLite；第一版 Alembic 迁移已加入，正式环境接入前还需要认证、权限和备份流程。
-- 主数据审计事件已加入；当前 `actor_type=system`，认证和权限尚未实现，不能把接口当作生产安全边界。
+- 本地默认使用 SQLite；第一版 Alembic 迁移已加入，正式环境接入前还需要完善用户中心、细粒度权限和备份流程。
+- 主数据审计事件已加入；直接服务层调用记为 `actor_type=system`，通过 API 的调用会记录 `actor_type=api` 及操作者 ID。
+- 当前认证是单个环境 API Key + 角色配置，尚未实现用户表、密钥轮换、登录会话和细粒度权限。
 - 外部平台连接器、采购/销售/库存业务模块尚未接入。
 - 解析无法确认时只产生待审核来源记录，不会按名称自动创建第二个主体或产品。
 - 本轮没有修改旧系统，也没有占用或替换 8000 端口。

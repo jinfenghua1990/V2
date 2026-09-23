@@ -165,3 +165,46 @@ def test_api_reads_canonical_records_and_review_queue(client):
         "party.created",
         "source_record.matched",
     }
+
+
+def test_api_requires_bearer_key_and_records_api_actor(secure_client, monkeypatch):
+    payload = {
+        "kind": "organization",
+        "name": "受保护主体",
+        "role": "customer",
+        "tax_identifier": "AUTH-001",
+        "source_system": "manual",
+        "source_object_type": "customer",
+        "source_external_id": "auth-1",
+    }
+
+    assert secure_client.get("/api/v1/source-records/review").status_code == 401
+    assert secure_client.post("/api/v1/parties/resolve", json=payload).status_code == 401
+    assert secure_client.post(
+        "/api/v1/parties/resolve",
+        json=payload,
+        headers={"Authorization": "Bearer wrong"},
+    ).status_code == 403
+
+    headers = {"Authorization": "Bearer test-api-key"}
+    created = secure_client.post(
+        "/api/v1/parties/resolve",
+        json=payload,
+        headers=headers,
+    )
+    assert created.status_code == 200
+
+    audit = secure_client.get(
+        f"/api/v1/audit-events?entity_id={created.json()['entity_id']}",
+        headers=headers,
+    )
+    assert audit.status_code == 200
+    assert audit.json()[0]["actor_type"] == "api"
+    assert audit.json()[0]["actor_id"] == "test-operator"
+
+    monkeypatch.setenv("V2_API_ROLE", "viewer")
+    assert secure_client.post(
+        "/api/v1/parties/resolve",
+        json={**payload, "source_external_id": "auth-2"},
+        headers=headers,
+    ).status_code == 403

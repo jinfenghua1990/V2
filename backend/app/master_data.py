@@ -58,6 +58,8 @@ def _new_source_record(
     source_object_type: str,
     source_external_id: str,
     payload: Dict[str, Any],
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> SourceRecord:
     record = SourceRecord(
         source_system=source_system,
@@ -77,6 +79,8 @@ def _new_source_record(
         entity_id=record.id,
         source_record_id=record.id,
         details={"content_hash": record.content_hash},
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     return record
 
@@ -89,6 +93,8 @@ def _audit_event(
     entity_id: Optional[str],
     source_record_id: Optional[str],
     details: Dict[str, Any],
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> None:
     db.add(
         AuditEvent(
@@ -96,7 +102,8 @@ def _audit_event(
             entity_type=entity_type,
             entity_id=entity_id,
             source_record_id=source_record_id,
-            actor_type="system",
+            actor_type=actor_type,
+            actor_id=actor_id,
             details=details,
         )
     )
@@ -111,6 +118,8 @@ def _record_resolution(
     status: str,
     reason: str,
     candidates: Optional[List[str]] = None,
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> None:
     candidate_ids = candidates or []
     _mark_source(
@@ -127,6 +136,8 @@ def _record_resolution(
         entity_id=entity_id,
         source_record_id=source.id,
         details={"reason": reason, "candidate_ids": candidate_ids},
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
 
 
@@ -186,6 +197,8 @@ def resolve_party(
     source_object_type: str,
     source_external_id: str,
     payload: Dict[str, Any],
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     source = _new_source_record(
         db,
@@ -193,6 +206,8 @@ def resolve_party(
         source_object_type=source_object_type,
         source_external_id=source_external_id,
         payload=payload,
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
 
     binding = (
@@ -217,6 +232,8 @@ def resolve_party(
             entity_id=party.id,
             status="matched",
             reason="external_binding",
+            actor_type=actor_type,
+            actor_id=actor_id,
         )
         db.commit()
         return _result("matched", "party", party.id, source.id, [], "已按外部来源映射到同一主体")
@@ -241,6 +258,8 @@ def resolve_party(
                 entity_id=identifier.party_id,
                 status="matched",
                 reason="strong_identifier",
+                actor_type=actor_type,
+                actor_id=actor_id,
             )
             db.commit()
             return _result("matched", "party", identifier.party_id, source.id, [], "已按强身份标识映射到同一主体")
@@ -261,6 +280,8 @@ def resolve_party(
             status="needs_review",
             reason="name_only",
             candidates=candidates,
+            actor_type=actor_type,
+            actor_id=actor_id,
         )
         db.commit()
         return _result("needs_review", "party", None, source.id, candidates, "名称相同但缺少足够身份依据，等待人工确认")
@@ -275,6 +296,8 @@ def resolve_party(
         entity_id=party.id,
         source_record_id=source.id,
         details={"kind": party.kind, "canonical_name": party.canonical_name},
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     if normalized_identifier:
         db.add(
@@ -295,6 +318,8 @@ def resolve_party(
         entity_id=party.id,
         status="matched",
         reason="created",
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     db.commit()
     return _result("created", "party", party.id, source.id, [], "已创建唯一规范主体")
@@ -310,6 +335,8 @@ def resolve_product(
     source_object_type: str,
     source_external_id: str,
     payload: Dict[str, Any],
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     source = _new_source_record(
         db,
@@ -317,6 +344,8 @@ def resolve_product(
         source_object_type=source_object_type,
         source_external_id=source_external_id,
         payload=payload,
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     binding = (
         db.query(ExternalBinding)
@@ -339,6 +368,8 @@ def resolve_product(
             entity_id=product.id,
             status="matched",
             reason="external_binding",
+            actor_type=actor_type,
+            actor_id=actor_id,
         )
         db.commit()
         return _result("matched", "product", product.id, source.id, [], "已按外部来源映射到同一产品")
@@ -363,6 +394,8 @@ def resolve_product(
                 entity_id=candidate.product_id,
                 status="matched",
                 reason="strong_identifier",
+                actor_type=actor_type,
+                actor_id=actor_id,
             )
             db.commit()
             return _result("matched", "product", candidate.product_id, source.id, [], "已按产品强标识映射到同一产品")
@@ -383,6 +416,8 @@ def resolve_product(
             status="needs_review",
             reason="name_only",
             candidates=candidates,
+            actor_type=actor_type,
+            actor_id=actor_id,
         )
         db.commit()
         return _result("needs_review", "product", None, source.id, candidates, "产品名称相同但缺少强标识，等待人工确认")
@@ -402,6 +437,8 @@ def resolve_product(
         entity_id=product.id,
         source_record_id=source.id,
         details={"product_code": product.product_code, "canonical_name": product.canonical_name},
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     if not any(kind == "product_code" for kind, _value, _normalized in identifiers):
         identifiers.append(("product_code", code, normalize_identifier(code)))
@@ -423,6 +460,8 @@ def resolve_product(
         entity_id=product.id,
         status="matched",
         reason="created",
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     db.commit()
     return _result("created", "product", product.id, source.id, [], "已创建唯一规范产品")
@@ -435,6 +474,8 @@ def resolve_source_record(
     entity_type: str,
     entity_id: str,
     party_role: Optional[str] = None,
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     source = db.get(SourceRecord, source_record_id)
     if source is None:
@@ -484,6 +525,8 @@ def resolve_source_record(
         entity_id=entity_id,
         status="matched",
         reason="manual_review",
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     _audit_event(
         db,
@@ -492,6 +535,8 @@ def resolve_source_record(
         entity_id=entity_id,
         source_record_id=source.id,
         details={"party_role": party_role},
+        actor_type=actor_type,
+        actor_id=actor_id,
     )
     db.commit()
     return _result("matched", entity_type, entity_id, source.id, [], "已人工确认并绑定到规范实体")
