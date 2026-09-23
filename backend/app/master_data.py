@@ -200,12 +200,33 @@ def resolve_party(
     actor_type: str = "system",
     actor_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    request_fields = {
+        "kind": kind,
+        "name": name,
+        "role": role,
+        "tax_identifier": tax_identifier,
+        "source_system": source_system,
+        "source_object_type": source_object_type,
+        "source_external_id": source_external_id,
+    }
+    if not normalize_text(name):
+        raise ValueError("主体名称不能为空")
+    if not all(value.strip() for value in (source_system, source_object_type, source_external_id)):
+        raise ValueError("来源系统、对象类型和外部编号不能为空")
+    if role is not None and not role.strip():
+        raise ValueError("主体角色不能为空")
+    source_system = source_system.strip()
+    source_object_type = source_object_type.strip()
+    source_external_id = source_external_id.strip()
+    role = role.strip() if role is not None else None
+    source_payload = {"request_fields": request_fields, "payload": payload}
+
     source = _new_source_record(
         db,
         source_system=source_system,
         source_object_type=source_object_type,
         source_external_id=source_external_id,
-        payload=payload,
+        payload=source_payload,
         actor_type=actor_type,
         actor_id=actor_id,
     )
@@ -213,7 +234,6 @@ def resolve_party(
     binding = (
         db.query(ExternalBinding)
         .filter(
-            ExternalBinding.entity_type == "party",
             ExternalBinding.source_system == source_system,
             ExternalBinding.source_object_type == source_object_type,
             ExternalBinding.source_external_id == source_external_id,
@@ -221,6 +241,36 @@ def resolve_party(
         .one_or_none()
     )
     if binding is not None:
+        if binding.entity_type != "party":
+            _record_resolution(
+                db,
+                source,
+                entity_type="party",
+                entity_id=None,
+                status="needs_review",
+                reason="binding_entity_type_conflict",
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
+            _audit_event(
+                db,
+                event_type="external_binding.type_conflict",
+                entity_type=binding.entity_type,
+                entity_id=binding.entity_id,
+                source_record_id=source.id,
+                details={"requested_entity_type": "party", "binding_id": binding.id},
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
+            db.commit()
+            return _result(
+                "needs_review",
+                "party",
+                None,
+                source.id,
+                [],
+                "该来源编号已绑定到产品，已加入待审核队列",
+            )
         party = db.get(Party, binding.entity_id)
         if party is None:
             raise ValueError("外部映射指向不存在的主体")
@@ -338,19 +388,35 @@ def resolve_product(
     actor_type: str = "system",
     actor_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    request_fields = {
+        "name": name,
+        "product_code": product_code,
+        "barcode": barcode,
+        "source_system": source_system,
+        "source_object_type": source_object_type,
+        "source_external_id": source_external_id,
+    }
+    if not normalize_text(name):
+        raise ValueError("产品名称不能为空")
+    if not all(value.strip() for value in (source_system, source_object_type, source_external_id)):
+        raise ValueError("来源系统、对象类型和外部编号不能为空")
+    source_system = source_system.strip()
+    source_object_type = source_object_type.strip()
+    source_external_id = source_external_id.strip()
+    source_payload = {"request_fields": request_fields, "payload": payload}
+
     source = _new_source_record(
         db,
         source_system=source_system,
         source_object_type=source_object_type,
         source_external_id=source_external_id,
-        payload=payload,
+        payload=source_payload,
         actor_type=actor_type,
         actor_id=actor_id,
     )
     binding = (
         db.query(ExternalBinding)
         .filter(
-            ExternalBinding.entity_type == "product",
             ExternalBinding.source_system == source_system,
             ExternalBinding.source_object_type == source_object_type,
             ExternalBinding.source_external_id == source_external_id,
@@ -358,6 +424,36 @@ def resolve_product(
         .one_or_none()
     )
     if binding is not None:
+        if binding.entity_type != "product":
+            _record_resolution(
+                db,
+                source,
+                entity_type="product",
+                entity_id=None,
+                status="needs_review",
+                reason="binding_entity_type_conflict",
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
+            _audit_event(
+                db,
+                event_type="external_binding.type_conflict",
+                entity_type=binding.entity_type,
+                entity_id=binding.entity_id,
+                source_record_id=source.id,
+                details={"requested_entity_type": "product", "binding_id": binding.id},
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
+            db.commit()
+            return _result(
+                "needs_review",
+                "product",
+                None,
+                source.id,
+                [],
+                "该来源编号已绑定到主体，已加入待审核队列",
+            )
         product = db.get(Product, binding.entity_id)
         if product is None:
             raise ValueError("外部映射指向不存在的产品")

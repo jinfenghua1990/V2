@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PartyResolveRequest(BaseModel):
@@ -16,6 +16,20 @@ class PartyResolveRequest(BaseModel):
     source_external_id: str = Field(min_length=1, max_length=256)
     payload: Dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("name", "source_system", "source_object_type", "source_external_id")
+    @classmethod
+    def reject_blank_values(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("名称和来源标识不能只包含空白字符")
+        return value
+
+    @field_validator("role")
+    @classmethod
+    def reject_blank_role(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("主体角色不能为空")
+        return value.strip() if value is not None else None
+
 
 class ProductResolveRequest(BaseModel):
     name: str = Field(min_length=1, max_length=512)
@@ -25,6 +39,13 @@ class ProductResolveRequest(BaseModel):
     source_object_type: str = Field(min_length=1, max_length=64)
     source_external_id: str = Field(min_length=1, max_length=256)
     payload: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name", "source_system", "source_object_type", "source_external_id")
+    @classmethod
+    def reject_blank_values(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("名称和来源标识不能只包含空白字符")
+        return value
 
 
 class SourceRecordResolveRequest(BaseModel):

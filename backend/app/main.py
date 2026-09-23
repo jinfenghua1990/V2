@@ -3,11 +3,9 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import models  # noqa: F401
-from .db import Base, SessionLocal, engine, get_db
+from .db import SessionLocal, get_db
 from .master_data import (
     get_party,
     get_product,
@@ -37,19 +35,13 @@ from .security import (
 
 def create_app(
     *,
-    db_engine: Optional[Engine] = None,
     session_factory: Optional[sessionmaker] = None,
-    initialize: bool = True,
     enforce_auth: bool = True,
 ) -> FastAPI:
     app = FastAPI(title="V2", version="0.1.0")
-    actual_engine = db_engine or engine
     actual_factory = session_factory or SessionLocal
     read_dependency = require_api_access if enforce_auth else allow_local_access
     write_dependency = require_write_access if enforce_auth else allow_local_access
-
-    if initialize:
-        Base.metadata.create_all(bind=actual_engine)
 
     def override_get_db():
         db = actual_factory()

@@ -130,6 +130,42 @@ def test_duplicate_source_import_keeps_both_source_records(db_session):
     assert db_session.query(ExternalBinding).count() == 1
 
 
+def test_source_payload_and_hash_include_all_resolution_fields(db_session):
+    first = resolve_party(
+        db_session,
+        **party_input(
+            name="初始主体名称",
+            tax_identifier="",
+            source_external_id="raw-1",
+            payload={},
+        ),
+    )
+    resolve_party(
+        db_session,
+        **party_input(
+            name="变更后的来源名称",
+            tax_identifier="",
+            source_external_id="raw-1",
+            payload={},
+        ),
+    )
+
+    records = (
+        db_session.query(SourceRecord)
+        .filter(SourceRecord.source_external_id == "raw-1")
+        .order_by(SourceRecord.received_at, SourceRecord.id)
+        .all()
+    )
+
+    assert first["entity_id"] is not None
+    hashes_by_name = {
+        record.payload["request_fields"]["name"]: record.content_hash
+        for record in records
+    }
+    assert set(hashes_by_name) == {"初始主体名称", "变更后的来源名称"}
+    assert hashes_by_name["初始主体名称"] != hashes_by_name["变更后的来源名称"]
+
+
 def test_audit_events_preserve_resolution_history(db_session):
     first = resolve_party(db_session, **party_input())
     review = resolve_party(

@@ -34,12 +34,7 @@ def client():
     )
     Base.metadata.create_all(bind=test_engine)
     factory = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
-    app = create_app(
-        db_engine=test_engine,
-        session_factory=factory,
-        initialize=False,
-        enforce_auth=False,
-    )
+    app = create_app(session_factory=factory, enforce_auth=False)
     with TestClient(app) as test_client:
         yield test_client
     Base.metadata.drop_all(bind=test_engine)
@@ -57,12 +52,7 @@ def secure_client(monkeypatch):
     monkeypatch.setenv("V2_API_KEY", "test-api-key")
     monkeypatch.setenv("V2_API_ACTOR_ID", "test-operator")
     monkeypatch.setenv("V2_API_ROLE", "operator")
-    app = create_app(
-        db_engine=test_engine,
-        session_factory=factory,
-        initialize=False,
-        enforce_auth=True,
-    )
+    app = create_app(session_factory=factory, enforce_auth=True)
     with TestClient(app) as test_client:
         yield test_client
     Base.metadata.drop_all(bind=test_engine)

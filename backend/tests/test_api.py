@@ -1,3 +1,9 @@
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import sessionmaker
+
+from app.main import create_app
+
+
 def test_healthz(client):
     response = client.get("/healthz")
 
@@ -7,6 +13,17 @@ def test_healthz(client):
         "service": "v2",
         "dataModel": "canonical-master-v1",
     }
+
+
+def test_app_factory_does_not_create_database_schema():
+    engine = create_engine("sqlite://")
+
+    create_app(
+        session_factory=sessionmaker(bind=engine),
+        enforce_auth=False,
+    )
+
+    assert inspect(engine).get_table_names() == []
 
 
 def test_api_resolves_same_party_to_one_identity(client):
@@ -155,7 +172,18 @@ def test_api_reads_canonical_records_and_review_queue(client):
     assert review.json()["status"] == "needs_review"
     assert review_queue.status_code == 200
     assert review_queue.json()[0]["id"] == review.json()["source_record_id"]
-    assert review_queue.json()[0]["payload"] == {"raw_name": "查询主体"}
+    assert review_queue.json()[0]["payload"] == {
+        "request_fields": {
+            "kind": "organization",
+            "name": "查询主体",
+            "role": None,
+            "tax_identifier": "",
+            "source_system": "1688",
+            "source_object_type": "supplier",
+            "source_external_id": "read-review-1",
+        },
+        "payload": {"raw_name": "查询主体"},
+    }
 
     audit = client.get(
         f"/api/v1/audit-events?entity_type=party&entity_id={party.json()['entity_id']}"
@@ -208,3 +236,93 @@ def test_api_requires_bearer_key_and_records_api_actor(secure_client, monkeypatc
         json={**payload, "source_external_id": "auth-2"},
         headers=headers,
     ).status_code == 403
+
+
+def test_api_rejects_blank_names_and_source_keys(client):
+    party = client.post(
+        "/api/v1/parties/resolve",
+        json={
+            "kind": "organization",
+            "name": "   ",
+            "source_system": "manual",
+            "source_object_type": "customer",
+            "source_external_id": "blank-party",
+        },
+    )
+    product = client.post(
+        "/api/v1/products/resolve",
+        json={
+            "name": "正常产品",
+            "source_system": "manual",
+            "source_object_type": "product",
+            "source_external_id": "   ",
+        },
+    )
+
+    assert party.status_code == 422
+    assert product.status_code == 422
+
+
+def test_api_sends_cross_entity_source_conflicts_to_review(client):
+    product = client.post(
+        "/api/v1/products/resolve",
+        json={
+            "name": "冲突产品",
+            "product_code": "CONFLICT-P-1",
+            "source_system": "manual",
+            "source_object_type": "record",
+            "source_external_id": "conflict-1",
+        },
+    )
+    party_conflict = client.post(
+        "/api/v1/parties/resolve",
+        json={
+            "kind": "organization",
+            "name": "冲突主体",
+            "source_system": "manual",
+            "source_object_type": "record",
+            "source_external_id": "conflict-1",
+        },
+    )
+    party = client.post(
+        "/api/v1/parties/resolve",
+        json={
+            "kind": "organization",
+            "name": "另一个冲突主体",
+            "source_system": "manual",
+            "source_object_type": "record",
+            "source_external_id": "conflict-2",
+        },
+    )
+    product_conflict = client.post(
+        "/api/v1/products/resolve",
+        json={
+            "name": "另一个冲突产品",
+            "source_system": "manual",
+            "source_object_type": "record",
+            "source_external_id": "conflict-2",
+        },
+    )
+
+    assert product.status_code == 200
+    assert party_conflict.status_code == 200
+    assert party_conflict.json()["status"] == "needs_review"
+    assert party_conflict.json()["entity_id"] is None
+    assert party.status_code == 200
+    assert product_conflict.status_code == 200
+    assert product_conflict.json()["status"] == "needs_review"
+    assert product_conflict.json()["entity_id"] is None
+    review_ids = {
+        record["id"]
+        for record in client.get("/api/v1/source-records/review").json()
+    }
+    assert party_conflict.json()["source_record_id"] in review_ids
+    assert product_conflict.json()["source_record_id"] in review_ids
+    for response in (party_conflict, product_conflict):
+        events = client.get(
+            f"/api/v1/audit-events?source_record_id={response.json()['source_record_id']}"
+        )
+        assert events.status_code == 200
+        assert "external_binding.type_conflict" in {
+            event["event_type"] for event in events.json()
+        }

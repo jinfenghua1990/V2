@@ -34,11 +34,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-def init_db() -> None:
-    # The first slice uses metadata creation for local development. A versioned
-    # migration will be added before any shared or production database is used.
-    from . import models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
